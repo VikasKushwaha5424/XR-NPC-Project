@@ -1,10 +1,13 @@
 import os
+import urllib.parse
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from dotenv import load_dotenv
 from google import genai
 from google.genai import types
+import edge_tts
 
 load_dotenv()
 
@@ -21,10 +24,10 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["X-NPC-Response"] # CRITICAL: Allows React/Unity to read the text header
 )
 
 # --- THE PERSONALITY ENGINE ---
-# This defines the core identity and guardrails for each of the 3 NPCs
 NPC_PROMPTS = {
     "maya": (
         "You are Maya, The Guide in a virtual reality laboratory. "
@@ -46,57 +49,82 @@ NPC_PROMPTS = {
     )
 }
 
-# --- ISOLATED MEMORY BANKS ---
-# Each NPC gets their own sliding-window memory array
+# --- THE VOICE ENGINE ---
+NPC_VOICES = {
+    "maya": "en-US-AriaNeural",       
+    "turing": "en-GB-RyanNeural",     
+    "silas": "en-US-ChristopherNeural" 
+}
+
 memories = {
     "maya": [],
     "turing": [],
     "silas": []
 }
 
-# We added 'npc_id' so the frontend can specify who the user is talking to
 class UserInput(BaseModel):
     text: str
-    npc_id: str = "maya" # Defaults to maya if nothing is sent
+    npc_id: str = "maya"
+    world_state: str = "The user is standing in a standard virtual room."
+
+def clean_text_for_voice(text: str) -> str:
+    text = text.replace("*", "").replace("#", "").replace("_", "")
+    return text
 
 @app.get("/")
 async def root():
-    return {"message": "System Online: XR-NPC Backend is running perfectly!"}
+    return {"message": "System Online: XR-NPC Backend is running with True Audio Streaming!"}
 
 @app.post("/generate")
 async def generate_response(user_input: UserInput):
-    # 1. Route the request to the correct NPC
     npc = user_input.npc_id.lower()
     if npc not in NPC_PROMPTS:
-        raise HTTPException(status_code=400, detail=f"Invalid NPC ID. Choose from: {list(NPC_PROMPTS.keys())}")
+        raise HTTPException(status_code=400, detail="Invalid NPC ID.")
 
-    # 2. Grab the specific memory bank and prompt for this NPC
     history = memories[npc]
     system_prompt = NPC_PROMPTS[npc]
 
     try:
-        # Add user message to this specific NPC's memory
-        history.append(types.Content(role="user", parts=[types.Part.from_text(text=user_input.text)]))
+        # 1. Context & Truncation
+        safe_text = user_input.text
+        if len(safe_text) > 300:
+            safe_text = safe_text[:300] + "... [User speech truncated]"
 
+        injected_prompt = f"[System World State: {user_input.world_state}] User says: {safe_text}"
+        history.append(types.Content(role="user", parts=[types.Part.from_text(text=injected_prompt)]))
+        
         if len(history) > 10:
-            history = history[-10:] # Sliding window
+            history = history[-10:]
 
-        # Generate response using the specific NPC's identity
+        # 2. Call Gemini
         response = client.models.generate_content(
             model='gemini-2.5-flash',
             contents=history,
-            config=types.GenerateContentConfig(
-                system_instruction=system_prompt
-            )
+            config=types.GenerateContentConfig(system_instruction=system_prompt)
         )
-
-        # Add AI response to this specific NPC's memory
         history.append(types.Content(role="model", parts=[types.Part.from_text(text=response.text)]))
+        
+        # 3. Setup True Audio Streaming
+        spoken_text = clean_text_for_voice(response.text)
+        voice = NPC_VOICES.get(npc, "en-US-AriaNeural")
+        
+        async def audio_stream():
+            communicate = edge_tts.Communicate(spoken_text, voice)
+            async for chunk in communicate.stream():
+                if chunk["type"] == "audio":
+                    yield chunk["data"]
 
-        return {
-            "npc_id": npc,
-            "response": response.text
-        }
+        # Encode the text safely so it can travel inside an HTTP header
+        encoded_text = urllib.parse.quote(response.text)
+
+        # 4. Return Header + Raw Byte Stream (No JSON, No Base64, No Temp Files)
+        return StreamingResponse(
+            audio_stream(),
+            media_type="audio/mpeg",
+            headers={
+                "X-NPC-Response": encoded_text
+            }
+        )
 
     except Exception as e:
         if history and history[-1].role == "user":

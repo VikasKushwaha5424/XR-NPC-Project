@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import axios from 'axios';
 import './App.css';
 
@@ -7,16 +7,42 @@ function App() {
   const [inputText, setInputText] = useState('');
   const [chatHistory, setChatHistory] = useState([]);
   const [isThinking, setIsThinking] = useState(false);
+  const [isListening, setIsListening] = useState(false); // Microphone state
 
-  // NPC styling and naming logic
   const npcDetails = {
     maya: { name: 'Maya (The Guide)', color: '#4CAF50' },
     turing: { name: 'Dr. Turing (Expert)', color: '#2196F3' },
     silas: { name: 'Silas (Adversary)', color: '#f44336' },
   };
 
+  // --- SPEECH TO TEXT LOGIC ---
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  const recognition = SpeechRecognition ? new SpeechRecognition() : null;
+
+  if (recognition) {
+    recognition.continuous = false;
+    recognition.interimResults = false;
+    recognition.lang = 'en-US';
+
+    recognition.onstart = () => setIsListening(true);
+    recognition.onend = () => setIsListening(false);
+    recognition.onresult = (event) => {
+      const transcript = event.results[0][0].transcript;
+      setInputText(transcript); // Puts your spoken words into the text box
+    };
+  }
+
+  const toggleListen = () => {
+    if (!recognition) {
+      alert("Your browser does not support Speech Recognition. Please use Google Chrome or Microsoft Edge.");
+      return;
+    }
+    isListening ? recognition.stop() : recognition.start();
+  };
+  // ---------------------------------
+
   const sendMessage = async (e) => {
-    e.preventDefault();
+    if (e) e.preventDefault();
     if (!inputText.trim()) return;
 
     const userMessage = { sender: 'user', text: inputText, npc: activeNpc };
@@ -25,13 +51,26 @@ function App() {
     setIsThinking(true);
 
     try {
+      // Tell Axios we are expecting a raw binary file stream, not JSON
       const response = await axios.post('http://127.0.0.1:8000/generate', {
         text: userMessage.text,
         npc_id: activeNpc,
+      }, {
+        responseType: 'blob' 
       });
 
-      const aiMessage = { sender: 'ai', text: response.data.response, npc: activeNpc };
+      // 1. Extract the text from the custom HTTP Header
+      const encodedText = response.headers['x-npc-response'];
+      const decodedText = decodeURIComponent(encodedText);
+
+      const aiMessage = { sender: 'ai', text: decodedText, npc: activeNpc };
       setChatHistory((prev) => [...prev, aiMessage]);
+
+      // 2. Play the raw binary audio stream instantly
+      const audioUrl = URL.createObjectURL(response.data);
+      const audio = new Audio(audioUrl);
+      audio.play();
+
     } catch (error) {
       console.error("API Error:", error);
       const errorMessage = { sender: 'ai', text: "Connection error. Is the backend running?", npc: activeNpc };
@@ -75,6 +114,16 @@ function App() {
         </div>
 
         <form className="input-area" onSubmit={sendMessage}>
+          {/* Microphone Button */}
+          <button 
+            type="button" 
+            className={`mic-button ${isListening ? 'listening' : ''}`} 
+            onClick={toggleListen}
+            title="Click to Speak"
+          >
+            {isListening ? '🎙️ Listening...' : '🎤'}
+          </button>
+          
           <input
             type="text"
             value={inputText}
