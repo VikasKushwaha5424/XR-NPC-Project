@@ -1,0 +1,38 @@
+# --- OS Generated ---
+.DS_Store
+Thumbs.db
+
+# --- Python Backend ---
+backend/venv/
+backend/__pycache__/
+backend/.env
+backend/.pytest_cache/
+
+# --- React Web UI ---
+web-ui/node_modules/
+web-ui/dist/
+web-ui/.env
+web-ui/.env.local
+
+# --- Unity XR Frontend (Phase 4 Prep) ---
+[Ll]ibrary/
+[Tt]emp/
+[Oo]bj/
+[Bb]uild/
+[Bb]uilds/
+Logs/
+UserSettings/
+*.csproj
+*.unityproj
+*.sln
+*.suo
+*.tmp
+*.user
+*.userprefs
+*.pidb
+*.booproj
+*.svd
+*.pdb
+*.mdb
+*.opendb
+*.VC.db
