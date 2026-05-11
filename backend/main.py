@@ -1,4 +1,6 @@
 import os
+import time
+import asyncio
 import urllib.parse
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -59,16 +61,33 @@ NPC_VOICES = {
     "silas": "en-US-ChristopherNeural" 
 }
 
-memories = {
-    "maya": [],
-    "turing": [],
-    "silas": []
-}
+# PATCH 2: Nested dictionary to isolate user sessions with garbage collection data
+# Format: { "session_123": { "last_active": 1700000000, "data": { "maya": [], "turing": [], "silas": [] } } }
+session_memories = {}
+
+# --- GARBAGE COLLECTOR TASK ---
+async def clean_old_sessions():
+    """Runs in the background to delete sessions inactive for over 1 hour"""
+    while True:
+        await asyncio.sleep(3600) # Wait 1 hour
+        current_time = time.time()
+        expired_sessions = [
+            sid for sid, s_data in session_memories.items() 
+            if current_time - s_data["last_active"] > 3600
+        ]
+        for sid in expired_sessions:
+            del session_memories[sid]
+            print(f"Garbage Collector: Deleted inactive session {sid}")
+
+@app.on_event("startup")
+async def startup_event():
+    asyncio.create_task(clean_old_sessions())
 
 class UserInput(BaseModel):
     text: str
     npc_id: str = "maya"
     world_state: str = "The user is standing in a standard virtual room."
+    session_id: str = "default_user" # Added to isolate different headsets/tabs
 
 def clean_text_for_voice(text: str) -> str:
     text = text.replace("*", "").replace("#", "").replace("_", "")
@@ -81,14 +100,18 @@ async def root():
 # --- 1. RESET ENDPOINT ---
 class ResetInput(BaseModel):
     npc_id: str
+    session_id: str = "default_user"
 
 @app.post("/reset")
 async def reset_memory(reset_input: ResetInput):
     npc = reset_input.npc_id.lower()
-    if npc in memories:
-        memories[npc] = []
-        return {"message": f"[{npc.upper()}] Memory wiped successfully. Ready for new user."}
-    raise HTTPException(status_code=400, detail="Invalid NPC ID.")
+    session = reset_input.session_id
+    
+    # Updated to navigate the new dictionary structure
+    if session in session_memories and npc in session_memories[session]["data"]:
+        session_memories[session]["data"][npc] = []
+        return {"message": f"[{npc.upper()}] Memory wiped successfully for session {session}."}
+    return {"message": "No memory found to wipe."}
 
 @app.post("/generate")
 async def generate_response(user_input: UserInput):
@@ -103,16 +126,27 @@ async def generate_response(user_input: UserInput):
         )
 
     npc = user_input.npc_id.lower()
+    session = user_input.session_id
 
     # --- THE EMPTY GHOST REQUEST FIX ---
-    # Deflect empty noise or heavy breathing (less than 2 characters)
     if len(user_input.text.strip()) < 2:
         raise HTTPException(status_code=204, detail="Input too short, ignoring.")
 
     if npc not in NPC_PROMPTS:
         raise HTTPException(status_code=400, detail="Invalid NPC ID.")
 
-    history = memories[npc]
+    # Initialize memory for new sessions dynamically
+    if session not in session_memories:
+        session_memories[session] = {
+            "last_active": time.time(), 
+            "data": {"maya": [], "turing": [], "silas": []}
+        }
+    
+    # Update the activity timestamp
+    session_memories[session]["last_active"] = time.time()
+    
+    # Access the specific NPC history
+    history = session_memories[session]["data"][npc]
     system_prompt = NPC_PROMPTS[npc]
 
     try:
@@ -127,8 +161,8 @@ async def generate_response(user_input: UserInput):
         if len(history) > 10:
             history = history[-10:]
 
-        # --- CAP OUTPUT TOKENS ---
-        response = client.models.generate_content(
+        # --- CAP OUTPUT TOKENS & PATCH 1: ASYNC GENERATION ---
+        response = await client.aio.models.generate_content(
             model='gemini-2.5-flash',
             contents=history,
             config=types.GenerateContentConfig(
@@ -137,20 +171,35 @@ async def generate_response(user_input: UserInput):
                 temperature=0.7         
             )
         )
+        
         history.append(types.Content(role="model", parts=[types.Part.from_text(text=response.text)]))
         
         # Setup True Audio Streaming
         spoken_text = clean_text_for_voice(response.text)
         voice = NPC_VOICES.get(npc, "en-US-AriaNeural")
         
+        # PATCH 1 (Audio): Internal Try/Except inside the generator to catch TTS network drops
         async def audio_stream():
-            communicate = edge_tts.Communicate(spoken_text, voice)
-            async for chunk in communicate.stream():
-                if chunk["type"] == "audio":
-                    yield chunk["data"]
+            try:
+                communicate = edge_tts.Communicate(spoken_text, voice)
+                async for chunk in communicate.stream():
+                    if chunk["type"] == "audio":
+                        yield chunk["data"]
+            except Exception as stream_error:
+                print(f"TTS Stream interrupted: {stream_error}")
+                # Roll back memory so the AI doesn't remember a failed message
+                if history and history[-1].role == "model":
+                    history.pop()
+                if history and history[-1].role == "user":
+                    history.pop()
 
+        # PATCH 3: Hard limit the header size to prevent 431 Server Crashes
+        header_text = response.text
+        if len(header_text) > 1000:
+            header_text = header_text[:1000] + "..."
+            
         # Encode the text safely so it can travel inside an HTTP header
-        encoded_text = urllib.parse.quote(response.text)
+        encoded_text = urllib.parse.quote(header_text)
 
         # Return Header + Raw Byte Stream
         return StreamingResponse(
@@ -164,7 +213,7 @@ async def generate_response(user_input: UserInput):
     except Exception as e:
         # --- PHANTOM MEMORY & DEMO DAY EXHAUSTION FIX ---
         
-        # 1. If TTS crashed, remove the AI's unsent response first
+        # 1. If TTS/API crashed, remove the AI's unsent response first
         if history and history[-1].role == "model":
             history.pop()
             

@@ -1,0 +1,39 @@
+.telemetry-hud {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  background-color: rgba(15, 15, 20, 0.95);
+  border-top: 2px solid #333;
+  color: #00ff00;
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 12px;
+  padding: 10px 20px;
+  box-sizing: border-box;
+  z-index: 9999; /* Keeps it above everything else */
+  box-shadow: 0px -5px 15px rgba(0,0,0,0.5);
+}
+
+.telemetry-header {
+  font-weight: bold;
+  font-size: 14px;
+  margin-bottom: 8px;
+  border-bottom: 1px dashed #333;
+  padding-bottom: 5px;
+}
+
+.telemetry-color {
+  margin-right: 10px;
+}
+
+.telemetry-logs {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.log-line { opacity: 0.9; }
+.log-info { color: #00ff00; } /* Green */
+.log-warn { color: #ffcc00; font-weight: bold; } /* Yellow */
+.log-fatal { color: #ff3333; font-weight: bold; } /* Red */
+.log-placeholder { color: #555; font-style: italic; }
