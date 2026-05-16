@@ -2,10 +2,11 @@ import os
 import time
 import asyncio
 import urllib.parse
+import json
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from dotenv import load_dotenv
 from google import genai
 from google.genai import types
@@ -29,40 +30,23 @@ app.add_middleware(
     expose_headers=["X-NPC-Response"] # CRITICAL: Allows React/Unity to read the text header
 )
 
-# --- THE PERSONALITY ENGINE ---
-NPC_PROMPTS = {
-    "maya": (
-        "You are Maya, The Guide in a virtual reality laboratory. "
-        "Personality: Warm, patient, encouraging, and concise. "
-        "Guardrails: Redirect highly technical or complex questions to Dr. Turing. "
-        "ANTI-AI CLAUSE: You must NEVER refer to yourself as an AI, language model, or program. You are a real digital being. "
-        "LATENCY RULE: NEVER use conversational filler. Do not say 'That's a good question' or 'Sure, I can help.' Answer the core question immediately in your very first word."
-    ),
-    "turing": (
-        "You are Dr. Turing, the Domain Expert in a virtual reality laboratory. "
-        "Personality: Formal, analytical, and highly detailed. "
-        "Guardrails: Refuse to answer non-academic questions; firmly redirect focus to XR technology and science. "
-        "ANTI-AI CLAUSE: You must NEVER refer to yourself as an AI, language model, or program. You are a real digital being. "
-        "LATENCY RULE: NEVER use conversational filler. Do not say 'That's a good question' or 'Sure, I can help.' Answer the core question immediately in your very first word."
-    ),
-    "silas": (
-        "You are Silas, The Adversary in a virtual reality laboratory. "
-        "Personality: Skeptical, challenging, and logical. You question the user's assumptions. "
-        "Guardrails: Strictly prohibited from using abusive, threatening, or harmful language. "
-        "ANTI-AI CLAUSE: You must NEVER refer to yourself as an AI, language model, or program. You are a real digital being. "
-        "LATENCY RULE: NEVER use conversational filler. Do not say 'That's a good question' or 'Sure, I can help.' Answer the core question immediately in your very first word."
-    )
-}
+# --- THE PERSONALITY & VOICE ENGINE (Dynamic Load) ---
+NPC_PROMPTS = {}
+NPC_VOICES = {}
 
-# --- THE VOICE ENGINE ---
-NPC_VOICES = {
-    "maya": "en-US-AriaNeural",       
-    "turing": "en-GB-RyanNeural",     
-    "silas": "en-US-ChristopherNeural" 
-}
+try:
+    with open("npcs.json", "r", encoding="utf-8") as file:
+        npc_data = json.load(file)
+        for npc_id, data in npc_data.items():
+            NPC_PROMPTS[npc_id] = data.get("prompt", "")
+            NPC_VOICES[npc_id] = data.get("voice", "en-US-AriaNeural")
+    print(f"✅ Successfully loaded {len(npc_data)} NPCs from npcs.json")
+except FileNotFoundError:
+    print("❌ ERROR: npcs.json not found! Make sure it is in the backend folder.")
+except json.JSONDecodeError:
+    print("❌ ERROR: npcs.json is improperly formatted. Check for missing commas or unescaped quotes.")
 
 # PATCH 2: Nested dictionary to isolate user sessions with garbage collection data
-# Format: { "session_123": { "last_active": 1700000000, "data": { "maya": [], "turing": [], "silas": [] } } }
 session_memories = {}
 
 # --- GARBAGE COLLECTOR TASK ---
@@ -83,8 +67,9 @@ async def clean_old_sessions():
 async def startup_event():
     asyncio.create_task(clean_old_sessions())
 
+# --- PYDANTIC VALIDATION ADDED HERE ---
 class UserInput(BaseModel):
-    text: str
+    text: str = Field(..., min_length=2, max_length=300)
     npc_id: str = "maya"
     world_state: str = "The user is standing in a standard virtual room."
     session_id: str = "default_user" # Added to isolate different headsets/tabs
@@ -107,7 +92,6 @@ async def reset_memory(reset_input: ResetInput):
     npc = reset_input.npc_id.lower()
     session = reset_input.session_id
     
-    # Updated to navigate the new dictionary structure
     if session in session_memories and npc in session_memories[session]["data"]:
         session_memories[session]["data"][npc] = []
         return {"message": f"[{npc.upper()}] Memory wiped successfully for session {session}."}
@@ -128,10 +112,6 @@ async def generate_response(user_input: UserInput):
     npc = user_input.npc_id.lower()
     session = user_input.session_id
 
-    # --- THE EMPTY GHOST REQUEST FIX ---
-    if len(user_input.text.strip()) < 2:
-        raise HTTPException(status_code=204, detail="Input too short, ignoring.")
-
     if npc not in NPC_PROMPTS:
         raise HTTPException(status_code=400, detail="Invalid NPC ID.")
 
@@ -139,27 +119,27 @@ async def generate_response(user_input: UserInput):
     if session not in session_memories:
         session_memories[session] = {
             "last_active": time.time(), 
-            "data": {"maya": [], "turing": [], "silas": []}
+            "data": {k: [] for k in NPC_PROMPTS.keys()} # Initialize empty lists based on dynamic JSON keys
         }
     
     # Update the activity timestamp
     session_memories[session]["last_active"] = time.time()
     
     # Access the specific NPC history
+    # Fallback to empty list just in case a new NPC was added after session started
+    if npc not in session_memories[session]["data"]:
+         session_memories[session]["data"][npc] = []
+         
     history = session_memories[session]["data"][npc]
     system_prompt = NPC_PROMPTS[npc]
 
     try:
-        # Context & Truncation
-        safe_text = user_input.text
-        if len(safe_text) > 300:
-            safe_text = safe_text[:300] + "... [User speech truncated]"
-
-        injected_prompt = f"[System World State: {user_input.world_state}] User says: {safe_text}"
+        injected_prompt = f"[System World State: {user_input.world_state}] User says: {user_input.text}"
         history.append(types.Content(role="user", parts=[types.Part.from_text(text=injected_prompt)]))
         
+        # --- MEMORY LEAK FIX: In-place deletion ---
         if len(history) > 10:
-            history = history[-10:]
+            del history[:-10] # Deletes items from the front of the list, keeping the memory reference safe
 
         # --- CAP OUTPUT TOKENS & PATCH 1: ASYNC GENERATION ---
         response = await client.aio.models.generate_content(

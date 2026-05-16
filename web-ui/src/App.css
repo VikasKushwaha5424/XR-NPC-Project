@@ -1,63 +1,134 @@
 body {
   margin: 0;
   font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-  background-color: #121212;
+  background-color: #0a0a0a; /* Darker background for a dashboard feel */
   color: #ffffff;
 }
 
 .app-container {
-  max-width: 800px;
+  max-width: 1400px; /* Expanded for Dashboard View */
   margin: 0 auto;
   height: 100vh;
   display: flex;
   flex-direction: column;
-  /* THE FIX: Pushes the whole app up so the HUD doesn't block the input */
-  padding-bottom: 130px; 
+  padding: 20px; 
   box-sizing: border-box; 
 }
 
 .header {
-  padding: 20px;
-  text-align: center;
+  padding-bottom: 20px;
   border-bottom: 1px solid #333;
+  margin-bottom: 20px;
 }
 
 .header h1 {
   color: #ffffff;
-  margin-top: 0;
+  margin: 0;
+  font-size: 24px;
+  text-transform: uppercase;
+  letter-spacing: 2px;
 }
 
+/* --- THE 3-COLUMN GRID --- */
+.dashboard-grid {
+  display: flex;
+  flex: 1;
+  gap: 20px;
+  overflow: hidden; /* Prevents whole page scrolling */
+}
+
+/* --- SIDEBARS (Left & Right) --- */
+.sidebar {
+  width: 300px;
+  background-color: #121212;
+  border: 1px solid #2b2b2b;
+  border-radius: 12px;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+}
+
+.sidebar h3 {
+  margin-top: 0;
+  font-size: 14px;
+  color: #888;
+  text-transform: uppercase;
+  border-bottom: 1px solid #333;
+  padding-bottom: 10px;
+}
+
+.section-title {
+  margin-top: 30px !important;
+}
+
+/* Vertical NPC Selector */
 .npc-selector {
   display: flex;
-  justify-content: center;
-  gap: 15px;
-  margin-top: 15px;
+  flex-direction: column;
+  gap: 8px;
 }
 
 .tab-button {
-  background: transparent;
-  color: #888;
-  border: none;
-  border-bottom: 3px solid transparent;
-  padding: 10px 20px;
+  background: #1a1a1a;
+  color: #aaa;
+  border: 1px solid #333;
+  border-left: 4px solid transparent;
+  padding: 12px 15px;
+  border-radius: 6px;
   cursor: pointer;
-  font-size: 16px;
-  transition: all 0.3s;
+  font-size: 15px;
+  text-align: left;
+  transition: all 0.2s;
 }
 
 .tab-button:hover { 
+  background: #222;
   color: #fff; 
 }
 
 .tab-button.active {
+  background: #2a2a2a;
   color: #fff;
   font-weight: bold;
 }
 
+/* World State Textarea */
+.world-state-input {
+  background-color: #1a1a1a;
+  border: 1px solid #333;
+  color: #fff;
+  padding: 10px;
+  border-radius: 6px;
+  height: 80px;
+  resize: none;
+  font-family: inherit;
+  font-size: 13px;
+}
+
+/* Danger Button */
+.danger-button {
+  background-color: transparent;
+  border: 1px solid #f44336;
+  color: #f44336;
+  padding: 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-weight: bold;
+  transition: all 0.2s;
+}
+
+.danger-button:hover {
+  background-color: rgba(244, 67, 54, 0.1);
+}
+
+/* --- CENTER CHAT WINDOW --- */
 .chat-window {
   flex: 1;
   display: flex;
   flex-direction: column;
+  background-color: #121212;
+  border: 1px solid #2b2b2b;
+  border-radius: 12px;
   padding: 20px;
   overflow: hidden;
 }
@@ -72,10 +143,11 @@ body {
 }
 
 .message-bubble {
-  max-width: 80%;
+  max-width: 85%;
   padding: 12px 16px;
   border-radius: 8px;
-  line-height: 1.4;
+  line-height: 1.5;
+  font-size: 15px;
 }
 
 .message-bubble.user {
@@ -92,20 +164,30 @@ body {
 
 .empty-state {
   text-align: center;
-  color: #666;
+  color: #555;
   margin-top: auto;
   margin-bottom: auto;
+  font-family: monospace;
 }
 
 .thinking {
   color: #888;
   font-style: italic;
+  animation: pulseOpacity 1.5s infinite;
+}
+
+@keyframes pulseOpacity {
+  0% { opacity: 0.5; }
+  50% { opacity: 1; }
+  100% { opacity: 0.5; }
 }
 
 .input-area {
   display: flex;
   gap: 10px;
-  margin-top: 10px;
+  margin-top: 15px;
+  border-top: 1px solid #333;
+  padding-top: 15px;
 }
 
 .input-area input {
@@ -113,56 +195,96 @@ body {
   padding: 15px;
   border-radius: 8px;
   border: 1px solid #444;
-  background-color: #1e1e1e;
+  background-color: #1a1a1a;
   color: white;
   font-size: 16px;
 }
 
-.input-area button {
+.input-area button[type="submit"] {
   padding: 0 25px;
   border-radius: 8px;
   border: none;
   background-color: #2196F3;
   color: white;
   font-weight: bold;
+  letter-spacing: 1px;
   cursor: pointer;
   transition: background-color 0.2s;
 }
 
 .input-area button:disabled {
-  background-color: #555;
+  background-color: #333;
+  color: #666;
   cursor: not-allowed;
 }
 
-/* --- Microphone Button Styles --- */
+/* Microphone Button */
 .mic-button {
-  background-color: #333 !important;
+  background-color: #2a2a2a !important;
   color: white;
-  border-radius: 50% !important;
-  width: 50px;
-  height: 50px;
-  padding: 0 !important;
+  border-radius: 8px !important;
+  width: 55px;
+  height: 55px;
   display: flex;
   align-items: center;
   justify-content: center;
   font-size: 20px;
+  border: 1px solid #444 !important;
   transition: all 0.3s ease;
+  cursor: pointer;
 }
 
 .mic-button:hover {
-  background-color: #444 !important;
+  background-color: #333 !important;
 }
 
 .mic-button.listening {
-  background-color: #f44336 !important;
-  animation: pulse 1.5s infinite;
-  width: 120px;
-  border-radius: 25px !important;
-  font-size: 14px;
+  background-color: rgba(244, 67, 54, 0.2) !important;
+  border-color: #f44336 !important;
+  animation: pulseMic 1.5s infinite;
 }
 
-@keyframes pulse {
-  0% { box-shadow: 0 0 0 0 rgba(244, 67, 54, 0.7); }
+@keyframes pulseMic {
+  0% { box-shadow: 0 0 0 0 rgba(244, 67, 54, 0.4); }
   70% { box-shadow: 0 0 0 10px rgba(244, 67, 54, 0); }
   100% { box-shadow: 0 0 0 0 rgba(244, 67, 54, 0); }
+}
+
+/* Telemetry wrapper inside sidebar */
+.telemetry-wrapper {
+  flex: 1;
+  overflow: hidden;
+  position: relative;
+}
+
+/* --- AUDIO PLAYBACK VISUALIZER --- */
+.equalizer {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 3px;
+  height: 14px;
+  margin-left: 10px;
+}
+
+.equalizer-bar {
+  width: 4px;
+  background-color: var(--eq-color, #4CAF50); /* Dynamically grabs the NPC's color from React! */
+  border-radius: 2px;
+  animation: eq-bounce 0.5s infinite ease-in-out alternate;
+}
+
+/* Stagger the animations so they look like sound waves */
+.equalizer-bar:nth-child(1) { animation-delay: 0s; }
+.equalizer-bar:nth-child(2) { animation-delay: 0.2s; }
+.equalizer-bar:nth-child(3) { animation-delay: 0.4s; }
+
+@keyframes eq-bounce {
+  0% { height: 4px; }
+  100% { height: 14px; }
+}
+
+/* Fix Mic Button to contain the new Canvas properly */
+.mic-button {
+  position: relative;
+  overflow: hidden;
 }
